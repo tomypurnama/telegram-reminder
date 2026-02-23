@@ -23,18 +23,23 @@ tanggal TEXT
 """)
 conn.commit()
 
+# ===== BUDGET RULE =====
+BUDGET = {
+    ("Food", "THB"): 300,
+    ("Transport", "THB"): 150,
+}
 
-# ===== SMART CATEGORY =====
+# ===== SMART =====
 def detect_category(text: str):
     t = text.lower()
 
-    if any(x in t for x in ["makan", "kopi", "food"]):
+    if any(x in t for x in ["makan","kopi","food"]):
         return "Food"
-    if any(x in t for x in ["grab", "transport", "bensin"]):
+    if any(x in t for x in ["grab","transport","bensin"]):
         return "Transport"
-    if any(x in t for x in ["anak", "keluarga"]):
+    if any(x in t for x in ["anak","keluarga"]):
         return "Family"
-    if any(x in t for x in ["gaji", "bonus"]):
+    if any(x in t for x in ["gaji","bonus"]):
         return "Income"
 
     return "Other"
@@ -56,11 +61,34 @@ def add_trx(tipe, jumlah, catatan):
     )
     conn.commit()
 
+    return kategori, currency
+
+
+def check_budget(kategori, currency):
+    tgl = str(date.today())
+
+    cur.execute("""
+    SELECT SUM(jumlah) FROM trx
+    WHERE tanggal=? AND kategori=? AND currency=? AND tipe='OUT'
+    """, (tgl, kategori, currency))
+
+    total = cur.fetchone()[0] or 0
+    limit = BUDGET.get((kategori, currency))
+
+    if not limit:
+        return None
+
+    if total >= limit:
+        return f"🚨 {kategori} melewati budget {limit} {currency}"
+    elif total >= limit * 0.8:
+        return f"⚠️ {kategori} mendekati budget {limit} {currency}"
+
+    return None
 
 # ===== COMMANDS =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "💰 Cashflow bot v3 siap\n\n"
+        "💰 Cashflow bot FULL siap\n\n"
         "/out jumlah catatan\n"
         "/in jumlah catatan\n"
         "/today\n"
@@ -68,28 +96,33 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/month"
     )
 
-
 async def out_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         jumlah = float(context.args[0])
         catatan = " ".join(context.args[1:]) or "out"
-        add_trx("OUT", jumlah, catatan)
+
+        kategori, currency = add_trx("OUT", jumlah, catatan)
 
         await update.message.reply_text(f"➖ {jumlah} disimpan ({catatan})")
+
+        alert = check_budget(kategori, currency)
+        if alert:
+            await update.message.reply_text(alert)
+
     except:
         await update.message.reply_text("Format salah\nContoh: /out 20 makan")
-
 
 async def in_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         jumlah = float(context.args[0])
         catatan = " ".join(context.args[1:]) or "in"
+
         add_trx("IN", jumlah, catatan)
 
         await update.message.reply_text(f"➕ {jumlah} disimpan ({catatan})")
+
     except:
         await update.message.reply_text("Format salah\nContoh: /in 500 gaji")
-
 
 async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tgl = str(date.today())
@@ -103,13 +136,11 @@ async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = "📊 Hari ini\n\n"
 
-    for r in rows:
-        tipe, jumlah, curc, cat = r
+    for tipe, jumlah, curc, cat in rows:
         icon = "➕" if tipe == "IN" else "➖"
         text += f"{icon} {cat} — {jumlah} {curc}\n"
 
     await update.message.reply_text(text)
-
 
 async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tgl = str(date.today())
@@ -142,7 +173,6 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += f"{k}: {j} {c}\n"
 
     await update.message.reply_text(text)
-
 
 async def month(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bulan = date.today().strftime("%Y-%m")
@@ -180,7 +210,6 @@ async def month(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(text)
 
-
 # ===== MAIN =====
 def main():
     app = Application.builder().token(TOKEN).build()
@@ -192,9 +221,8 @@ def main():
     app.add_handler(CommandHandler("summary", summary))
     app.add_handler(CommandHandler("month", month))
 
-    print("Cashflow bot v3 jalan...")
+    print("Cashflow FULL jalan...")
     app.run_polling()
-
 
 if __name__ == "__main__":
     main()
