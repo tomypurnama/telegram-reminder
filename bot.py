@@ -1,19 +1,23 @@
-from telegram import Bot
-import schedule
-import time
 import os
+import asyncio
+import schedule
+from telegram import Bot
 
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 bot = Bot(token=TOKEN)
 
-def bangun():
-    bot.send_message(chat_id=CHAT_ID, text="⏰ Bangun tidur bosku!")
+async def bangun_async():
+    await bot.send_message(chat_id=CHAT_ID, text="⏰ Bangun tidur bosku!")
 
-schedule.every().minute.do(bangun)
+def bangun():
+    asyncio.run(bangun_async())
+
+schedule.every(1).minutes.do(bangun)
+
+print("Bot jalan...")
 
 while True:
     schedule.run_pending()
-
-    time.sleep(1)
+    asyncio.sleep(1)
