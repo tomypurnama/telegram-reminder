@@ -20,4 +20,6 @@ print("Bot jalan...")
 
 while True:
     schedule.run_pending()
-    asyncio.sleep(1)
+    import time
+time.sleep(1)
+
