@@ -20,7 +20,7 @@ async def ingatkan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"⏰ {pesan}")
 
     except:
-        await update.message.reply_text("Format salah")
+        await update.message.reply_text("Format salah\nContoh: /ingatkan 10 minum air")
 
 async def main():
     app = Application.builder().token(TOKEN).build()
@@ -30,12 +30,7 @@ async def main():
 
     print("Bot stabil jalan...")
 
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
-
-    while True:
-        await asyncio.sleep(3600)
+    await app.run_polling()
 
 if __name__ == "__main__":
     asyncio.run(main())
