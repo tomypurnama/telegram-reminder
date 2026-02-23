@@ -1,5 +1,4 @@
 import os
-import asyncio
 import sqlite3
 from datetime import date
 from telegram import Update
@@ -92,8 +91,8 @@ async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text)
 
 
-# ===== MAIN =====
-async def main():
+# ⭐ MAIN FIX (PENTING)
+def main():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -102,8 +101,8 @@ async def main():
     app.add_handler(CommandHandler("today", today))
 
     print("Cashflow bot jalan...")
-    await app.run_polling()
+    app.run_polling()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
