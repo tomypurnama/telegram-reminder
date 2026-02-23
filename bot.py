@@ -1,153 +1,214 @@
 import os
+import asyncio
 import sqlite3
-from datetime import date, timedelta
+from datetime import datetime, timedelta
+
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 TOKEN = os.getenv("TOKEN")
 
-EXCHANGE_RATE = 800
+DB = "data.db"
+KURS_THB_IDR = 450  # bisa ubah nanti
 
-conn = sqlite3.connect("cashflow.db", check_same_thread=False)
-cur = conn.cursor()
+# ================= DB =================
 
-cur.execute("""
+conn = sqlite3.connect(DB, check_same_thread=False)
+c = conn.cursor()
+
+c.execute("""
 CREATE TABLE IF NOT EXISTS trx(
 id INTEGER PRIMARY KEY AUTOINCREMENT,
 tipe TEXT,
 jumlah REAL,
 currency TEXT,
-kategori TEXT,
-catatan TEXT,
-tanggal TEXT
+note TEXT,
+created TEXT
 )
 """)
+
+c.execute("""
+CREATE TABLE IF NOT EXISTS reminder(
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+chat_id TEXT,
+text TEXT,
+waktu TEXT,
+repeat TEXT
+)
+""")
+
 conn.commit()
 
-# ===== UTIL =====
+# ================= UTILS =================
+
 def clean_number(text: str):
-    return float(text.replace(".", "").replace(",", ""))
+    text = text.replace(".", "").replace(",", "")
+    return float(text)
 
-def detect_category(text: str):
-    t = text.lower()
-    if "makan" in t or "kopi" in t: return "Food"
-    if "grab" in t or "transport" in t: return "Transport"
-    if "anak" in t or "keluarga" in t: return "Family"
-    if "gaji" in t or "bonus" in t: return "Income"
-    return "Other"
-
-def parse_input(args):
+def parse_money(args):
     jumlah = clean_number(args[0])
 
     currency = "THB"
     start_note = 1
 
-    if len(args) > 1 and args[1].lower() in ["thb","idr"]:
+    if len(args) > 1 and args[1].lower() in ["idr","thb"]:
         currency = args[1].upper()
         start_note = 2
 
-    catatan = " ".join(args[start_note:]) or "trx"
-    return jumlah, currency, catatan
+    note = " ".join(args[start_note:]) or "trx"
+    return jumlah, currency, note
 
-def to_idr(jumlah, currency):
-    return jumlah if currency == "IDR" else jumlah * EXCHANGE_RATE
-
-def add_trx(tipe, jumlah, currency, catatan):
-    kategori = detect_category(catatan)
-
-    cur.execute(
-        "INSERT INTO trx(tipe,jumlah,currency,kategori,catatan,tanggal) VALUES(?,?,?,?,?,?)",
-        (tipe, jumlah, currency, kategori, catatan, str(date.today()))
-    )
+def save_trx(tipe, jumlah, currency, note):
+    c.execute("INSERT INTO trx(tipe,jumlah,currency,note,created) VALUES(?,?,?,?,?)",
+              (tipe, jumlah, currency, note, datetime.now().isoformat()))
     conn.commit()
 
-# ===== COMMANDS =====
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "💰 Cashflow PRO siap\n"
-        "/out 20 thb makan\n"
-        "/in 1.000.000 idr gaji\n"
-        "/summary /week /month"
-    )
-
-async def out_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        jumlah, currency, catatan = parse_input(context.args)
-        add_trx("OUT", jumlah, currency, catatan)
-        await update.message.reply_text(f"➖ {jumlah} {currency} disimpan ({catatan})")
-    except:
-        await update.message.reply_text("Format: /out 20 thb makan")
+# ================= CASHFLOW =================
 
 async def in_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        jumlah, currency, catatan = parse_input(context.args)
-        add_trx("IN", jumlah, currency, catatan)
-        await update.message.reply_text(f"➕ {jumlah} {currency} disimpan ({catatan})")
+        jumlah, currency, note = parse_money(context.args)
+        save_trx("in", jumlah, currency, note)
+        await update.message.reply_text(f"➕ {jumlah} {currency} disimpan")
     except:
-        await update.message.reply_text("Format: /in 500 thb gaji")
+        await update.message.reply_text("Format salah\n/in 10000 thb gaji")
 
-# ===== FIX TOTAL =====
-def calc_total(rows):
-    total = 0
-    for tipe, jumlah, curc in rows:
-        idr = to_idr(jumlah, curc)
+async def out_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        jumlah, currency, note = parse_money(context.args)
+        save_trx("out", jumlah, currency, note)
+        await update.message.reply_text(f"➖ {jumlah} {currency} disimpan")
+    except:
+        await update.message.reply_text("Format salah\n/out 200 thb makan")
 
-        if tipe == "OUT":
-            total -= idr
-        else:
-            total += idr
-
-    return total
+# ================= SUMMARY =================
 
 async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tgl = str(date.today())
+    rows = c.execute("SELECT tipe,jumlah,currency FROM trx").fetchall()
 
-    cur.execute("SELECT tipe,jumlah,currency FROM trx WHERE tanggal=?", (tgl,))
-    rows = cur.fetchall()
+    idr = 0
+    thb = 0
 
-    total = calc_total(rows)
+    for t,j,curr in rows:
+        val = j if t == "in" else -j
+        if curr == "IDR":
+            idr += val
+        else:
+            thb += val
 
-    await update.message.reply_text(
-        f"📊 Summary hari ini\n\nTotal (IDR eq): {int(total):,}"
-    )
-
-async def week(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    start = date.today() - timedelta(days=6)
-
-    cur.execute("SELECT tipe,jumlah,currency FROM trx WHERE tanggal>=?", (str(start),))
-    rows = cur.fetchall()
-
-    total = calc_total(rows)
+    eq = idr + thb * KURS_THB_IDR
 
     await update.message.reply_text(
-        f"📆 Minggu ini (IDR eq): {int(total):,}"
+        f"📊 Summary\n\n"
+        f"IDR: {idr:,.0f}\n"
+        f"THB: {thb:,.0f}\n"
+        f"EQ IDR: {eq:,.0f}"
     )
 
-async def month(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    bulan = date.today().strftime("%Y-%m")
+# ================= INSIGHT =================
 
-    cur.execute("SELECT tipe,jumlah,currency FROM trx WHERE substr(tanggal,1,7)=?", (bulan,))
-    rows = cur.fetchall()
+async def insight(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    rows = c.execute("SELECT tipe,jumlah,currency FROM trx WHERE tipe='out'").fetchall()
 
-    total = calc_total(rows)
+    total_idr = sum(j for t,j,c in rows if c=="IDR")
+    total_thb = sum(j for t,j,c in rows if c=="THB")
 
+    text = "🧠 Insight\n\n"
+
+    if total_idr > 5_000_000:
+        text += "⚠️ Pengeluaran IDR besar\n"
+
+    if total_thb > 10_000:
+        text += "⚠️ Pengeluaran THB besar\n"
+
+    if text == "🧠 Insight\n\n":
+        text += "Aman 👍"
+
+    await update.message.reply_text(text)
+
+# ================= REMINDER =================
+
+async def ingatkan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        menit = int(context.args[0])
+        text = " ".join(context.args[1:]) or "Reminder"
+
+        waktu = datetime.now() + timedelta(minutes=menit)
+
+        c.execute("INSERT INTO reminder(chat_id,text,waktu,repeat) VALUES(?,?,?,?)",
+                  (str(update.effective_chat.id), text, waktu.isoformat(), "once"))
+        conn.commit()
+
+        await update.message.reply_text("✅ Reminder disimpan")
+
+    except:
+        await update.message.reply_text("Format salah\n/ingatkan 10 minum")
+
+async def ingatkan_harian(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        jam = context.args[0]  # HH:MM
+        text = " ".join(context.args[1:]) or "Reminder"
+
+        c.execute("INSERT INTO reminder(chat_id,text,waktu,repeat) VALUES(?,?,?,?)",
+                  (str(update.effective_chat.id), text, jam, "daily"))
+        conn.commit()
+
+        await update.message.reply_text("✅ Reminder harian disimpan")
+
+    except:
+        await update.message.reply_text("Format salah\n/ingatkan_harian 09:00 minum")
+
+async def reminder_loop(app: Application):
+    while True:
+        now = datetime.now()
+
+        rows = c.execute("SELECT id,chat_id,text,waktu,repeat FROM reminder").fetchall()
+
+        for r in rows:
+            rid, chat_id, text, waktu, rep = r
+
+            if rep == "once":
+                dt = datetime.fromisoformat(waktu)
+                if now >= dt:
+                    await app.bot.send_message(chat_id, f"⏰ {text}")
+                    c.execute("DELETE FROM reminder WHERE id=?", (rid,))
+                    conn.commit()
+
+            if rep == "daily":
+                hhmm = now.strftime("%H:%M")
+                if hhmm == waktu:
+                    await app.bot.send_message(chat_id, f"🔁 {text}")
+
+        await asyncio.sleep(30)
+
+# ================= START =================
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        f"📅 Bulan ini (IDR eq): {int(total):,}"
+        "Bot Finance Pro siap 👍\n\n"
+        "/in jumlah\n"
+        "/out jumlah\n"
+        "/summary\n"
+        "/insight\n"
+        "/ingatkan\n"
+        "/ingatkan_harian"
     )
 
-# ===== MAIN =====
-def main():
+async def main():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("out", out_cmd))
     app.add_handler(CommandHandler("in", in_cmd))
+    app.add_handler(CommandHandler("out", out_cmd))
     app.add_handler(CommandHandler("summary", summary))
-    app.add_handler(CommandHandler("week", week))
-    app.add_handler(CommandHandler("month", month))
+    app.add_handler(CommandHandler("insight", insight))
+    app.add_handler(CommandHandler("ingatkan", ingatkan))
+    app.add_handler(CommandHandler("ingatkan_harian", ingatkan_harian))
 
-    print("Cashflow PRO FIX jalan...")
-    app.run_polling()
+    asyncio.create_task(reminder_loop(app))
+
+    print("FULL PRO BOT jalan...")
+    await app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
