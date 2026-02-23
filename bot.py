@@ -16,6 +16,7 @@ id INTEGER PRIMARY KEY AUTOINCREMENT,
 tipe TEXT,
 jumlah REAL,
 currency TEXT,
+kategori TEXT,
 catatan TEXT,
 tanggal TEXT
 )
@@ -23,7 +24,22 @@ tanggal TEXT
 conn.commit()
 
 
-# ===== HELPER =====
+# ===== SMART CATEGORY =====
+def detect_category(text: str):
+    t = text.lower()
+
+    if any(x in t for x in ["makan", "kopi", "food"]):
+        return "Food"
+    if any(x in t for x in ["grab", "transport", "bensin"]):
+        return "Transport"
+    if any(x in t for x in ["anak", "keluarga"]):
+        return "Family"
+    if any(x in t for x in ["gaji", "bonus"]):
+        return "Income"
+
+    return "Other"
+
+
 def detect_currency(jumlah: float):
     if jumlah >= 10000:
         return "IDR"
@@ -32,9 +48,11 @@ def detect_currency(jumlah: float):
 
 def add_trx(tipe, jumlah, catatan):
     currency = detect_currency(jumlah)
+    kategori = detect_category(catatan)
+
     cur.execute(
-        "INSERT INTO trx(tipe,jumlah,currency,catatan,tanggal) VALUES(?,?,?,?,?)",
-        (tipe, jumlah, currency, catatan, str(date.today()))
+        "INSERT INTO trx(tipe,jumlah,currency,kategori,catatan,tanggal) VALUES(?,?,?,?,?,?)",
+        (tipe, jumlah, currency, kategori, catatan, str(date.today()))
     )
     conn.commit()
 
@@ -42,10 +60,11 @@ def add_trx(tipe, jumlah, catatan):
 # ===== COMMANDS =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "💰 Cashflow bot siap\n\n"
+        "💰 Cashflow bot v2 siap\n\n"
         "/out jumlah catatan\n"
         "/in jumlah catatan\n"
-        "/today"
+        "/today\n"
+        "/summary"
     )
 
 
@@ -91,7 +110,42 @@ async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text)
 
 
-# ⭐ MAIN FIX (PENTING)
+async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    tgl = str(date.today())
+
+    # currency summary
+    cur.execute("""
+    SELECT currency, tipe, SUM(jumlah)
+    FROM trx
+    WHERE tanggal=?
+    GROUP BY currency, tipe
+    """, (tgl,))
+    rows = cur.fetchall()
+
+    text = "📊 Summary hari ini\n\n"
+
+    for c, t, j in rows:
+        icon = "➕" if t == "IN" else "➖"
+        text += f"{c} {icon} {j}\n"
+
+    # kategori
+    cur.execute("""
+    SELECT kategori, SUM(jumlah), currency
+    FROM trx
+    WHERE tanggal=? AND tipe='OUT'
+    GROUP BY kategori, currency
+    """, (tgl,))
+    krows = cur.fetchall()
+
+    if krows:
+        text += "\nKategori:\n"
+        for k, j, c in krows:
+            text += f"{k}: {j} {c}\n"
+
+    await update.message.reply_text(text)
+
+
+# ===== MAIN =====
 def main():
     app = Application.builder().token(TOKEN).build()
 
@@ -99,8 +153,9 @@ def main():
     app.add_handler(CommandHandler("out", out_cmd))
     app.add_handler(CommandHandler("in", in_cmd))
     app.add_handler(CommandHandler("today", today))
+    app.add_handler(CommandHandler("summary", summary))
 
-    print("Cashflow bot jalan...")
+    print("Cashflow bot v2 jalan...")
     app.run_polling()
 
 
