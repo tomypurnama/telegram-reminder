@@ -22,7 +22,7 @@ async def ingatkan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         await update.message.reply_text("Format salah.\nContoh: /ingatkan 10 minum air")
 
-async def main():
+async def run_bot():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -30,7 +30,12 @@ async def main():
 
     print("Bot reminder jalan...")
 
-    await app.run_polling()
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+
+    while True:
+        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run_bot())
