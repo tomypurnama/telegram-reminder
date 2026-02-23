@@ -1,26 +1,38 @@
 import os
 import asyncio
-import schedule
-from telegram import Bot
+from telegram import Update, Bot
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 TOKEN = os.getenv("TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
 
-bot = Bot(token=TOKEN)
+# command /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Bot reminder siap 👍\nContoh: /ingatkan 10 minum air")
 
-async def bangun_async():
-    await bot.send_message(chat_id=CHAT_ID, text="⏰ Bangun tidur bosku!")
+# command /ingatkan
+async def ingatkan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        menit = int(context.args[0])
+        pesan = " ".join(context.args[1:]) or "Reminder"
 
-def bangun():
-    asyncio.run(bangun_async())
+        await update.message.reply_text(f"⏳ Oke, aku ingatkan {menit} menit lagi: {pesan}")
 
-schedule.every().day.at("05:30").do(bangun)
+        await asyncio.sleep(menit * 60)
 
-print("Bot jalan...")
+        await update.message.reply_text(f"⏰ Reminder: {pesan}")
 
-while True:
-    schedule.run_pending()
-    import time
-time.sleep(1)
+    except:
+        await update.message.reply_text("Format salah.\nContoh: /ingatkan 10 minum air")
 
+def main():
+    app = ApplicationBuilder().token(TOKEN).build()
 
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("ingatkan", ingatkan))
+
+    print("Bot reminder jalan...")
+
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
