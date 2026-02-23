@@ -22,7 +22,7 @@ async def ingatkan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         await update.message.reply_text("Format salah\nContoh: /ingatkan 10 minum air")
 
-async def main():
+async def run():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -30,7 +30,13 @@ async def main():
 
     print("Bot stabil jalan...")
 
-    await app.run_polling()
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
 
-if __name__ == "__main__":
-    asyncio.run(main())
+    while True:
+        await asyncio.sleep(3600)
+
+loop = asyncio.get_event_loop()
+loop.create_task(run())
+loop.run_forever()
