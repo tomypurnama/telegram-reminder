@@ -1,6 +1,7 @@
 import os
+import asyncio
 import sqlite3
-from datetime import datetime
+from datetime import date
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
@@ -8,119 +9,101 @@ TOKEN = os.getenv("TOKEN")
 
 # ===== DATABASE =====
 conn = sqlite3.connect("cashflow.db", check_same_thread=False)
-cursor = conn.cursor()
+cur = conn.cursor()
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS transaksi (
+cur.execute("""
+CREATE TABLE IF NOT EXISTS trx(
 id INTEGER PRIMARY KEY AUTOINCREMENT,
 tipe TEXT,
 jumlah REAL,
 currency TEXT,
-kategori TEXT,
+catatan TEXT,
 tanggal TEXT
 )
 """)
 conn.commit()
 
-# ===== COMMAND =====
+
+# ===== HELPER =====
+def detect_currency(jumlah: float):
+    if jumlah >= 10000:
+        return "IDR"
+    return "THB"
+
+
+def add_trx(tipe, jumlah, catatan):
+    currency = detect_currency(jumlah)
+    cur.execute(
+        "INSERT INTO trx(tipe,jumlah,currency,catatan,tanggal) VALUES(?,?,?,?,?)",
+        (tipe, jumlah, currency, catatan, str(date.today()))
+    )
+    conn.commit()
+
+
+# ===== COMMANDS =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Cashflow bot siap 👍\n"
-        "/keluar 80 thb makan\n"
-        "/masuk 1000000 idr gaji\n"
-        "/saldo\n"
-        "/hari"
+        "💰 Cashflow bot siap\n\n"
+        "/out jumlah catatan\n"
+        "/in jumlah catatan\n"
+        "/today"
     )
 
-async def keluar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+async def out_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         jumlah = float(context.args[0])
-        currency = context.args[1].lower()
-        kategori = " ".join(context.args[2:]) or "lainnya"
+        catatan = " ".join(context.args[1:]) or "out"
+        add_trx("OUT", jumlah, catatan)
 
-        cursor.execute(
-            "INSERT INTO transaksi (tipe,jumlah,currency,kategori,tanggal) VALUES (?,?,?,?,?)",
-            ("keluar", jumlah, currency, kategori, datetime.now().isoformat())
-        )
-        conn.commit()
-
-        await update.message.reply_text("✅ Pengeluaran dicatat")
-
+        await update.message.reply_text(f"➖ {jumlah} disimpan ({catatan})")
     except:
-        await update.message.reply_text("Format: /keluar 80 thb makan")
+        await update.message.reply_text("Format salah\nContoh: /out 20 makan")
 
-async def masuk(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+async def in_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         jumlah = float(context.args[0])
-        currency = context.args[1].lower()
-        kategori = " ".join(context.args[2:]) or "lainnya"
+        catatan = " ".join(context.args[1:]) or "in"
+        add_trx("IN", jumlah, catatan)
 
-        cursor.execute(
-            "INSERT INTO transaksi (tipe,jumlah,currency,kategori,tanggal) VALUES (?,?,?,?,?)",
-            ("masuk", jumlah, currency, kategori, datetime.now().isoformat())
-        )
-        conn.commit()
-
-        await update.message.reply_text("✅ Pemasukan dicatat")
-
+        await update.message.reply_text(f"➕ {jumlah} disimpan ({catatan})")
     except:
-        await update.message.reply_text("Format: /masuk 1000000 idr gaji")
+        await update.message.reply_text("Format salah\nContoh: /in 500 gaji")
 
-async def saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    rows = cursor.execute("""
-    SELECT currency,
-    SUM(CASE WHEN tipe='masuk' THEN jumlah ELSE 0 END) -
-    SUM(CASE WHEN tipe='keluar' THEN jumlah ELSE 0 END)
-    FROM transaksi
-    GROUP BY currency
-    """).fetchall()
 
-    if not rows:
-        await update.message.reply_text("Belum ada data")
-        return
+async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    tgl = str(date.today())
 
-    teks = "Saldo:\n"
-    for currency, total in rows:
-        teks += f"{currency.upper()}: {total:,.0f}\n"
-
-    await update.message.reply_text(teks)
-
-async def hari(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    today = datetime.now().date().isoformat()
-
-    rows = cursor.execute("""
-    SELECT tipe,jumlah,currency,kategori
-    FROM transaksi
-    WHERE substr(tanggal,1,10)=?
-    """, (today,)).fetchall()
+    cur.execute("SELECT tipe,jumlah,currency,catatan FROM trx WHERE tanggal=?", (tgl,))
+    rows = cur.fetchall()
 
     if not rows:
         await update.message.reply_text("Tidak ada transaksi hari ini")
         return
 
-    teks = "Hari ini:\n"
-    for tipe, jumlah, currency, kategori in rows:
-        teks += f"{tipe} {jumlah} {currency} — {kategori}\n"
+    text = "📊 Hari ini\n\n"
 
-    await update.message.reply_text(teks)
+    for r in rows:
+        tipe, jumlah, curc, cat = r
+        icon = "➕" if tipe == "IN" else "➖"
+        text += f"{icon} {cat} — {jumlah} {curc}\n"
 
-# ===== RUN BOT =====
-async def run():
+    await update.message.reply_text(text)
+
+
+# ===== MAIN =====
+async def main():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("keluar", keluar))
-    app.add_handler(CommandHandler("masuk", masuk))
-    app.add_handler(CommandHandler("saldo", saldo))
-    app.add_handler(CommandHandler("hari", hari))
+    app.add_handler(CommandHandler("out", out_cmd))
+    app.add_handler(CommandHandler("in", in_cmd))
+    app.add_handler(CommandHandler("today", today))
 
     print("Cashflow bot jalan...")
+    await app.run_polling()
 
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
 
-import asyncio
-loop = asyncio.get_event_loop()
-loop.create_task(run())
-loop.run_forever()
+if __name__ == "__main__":
+    asyncio.run(main())
