@@ -60,11 +60,12 @@ def add_trx(tipe, jumlah, catatan):
 # ===== COMMANDS =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "💰 Cashflow bot v2 siap\n\n"
+        "💰 Cashflow bot v3 siap\n\n"
         "/out jumlah catatan\n"
         "/in jumlah catatan\n"
         "/today\n"
-        "/summary"
+        "/summary\n"
+        "/month"
     )
 
 
@@ -113,7 +114,6 @@ async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tgl = str(date.today())
 
-    # currency summary
     cur.execute("""
     SELECT currency, tipe, SUM(jumlah)
     FROM trx
@@ -128,13 +128,49 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
         icon = "➕" if t == "IN" else "➖"
         text += f"{c} {icon} {j}\n"
 
-    # kategori
     cur.execute("""
     SELECT kategori, SUM(jumlah), currency
     FROM trx
     WHERE tanggal=? AND tipe='OUT'
     GROUP BY kategori, currency
     """, (tgl,))
+    krows = cur.fetchall()
+
+    if krows:
+        text += "\nKategori:\n"
+        for k, j, c in krows:
+            text += f"{k}: {j} {c}\n"
+
+    await update.message.reply_text(text)
+
+
+async def month(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    bulan = date.today().strftime("%Y-%m")
+
+    cur.execute("""
+    SELECT currency, tipe, SUM(jumlah)
+    FROM trx
+    WHERE substr(tanggal,1,7)=?
+    GROUP BY currency, tipe
+    """, (bulan,))
+    rows = cur.fetchall()
+
+    if not rows:
+        await update.message.reply_text("Belum ada transaksi bulan ini")
+        return
+
+    text = "📅 Bulan ini\n\n"
+
+    for c, t, j in rows:
+        icon = "➕" if t == "IN" else "➖"
+        text += f"{c} {icon} {j}\n"
+
+    cur.execute("""
+    SELECT kategori, SUM(jumlah), currency
+    FROM trx
+    WHERE substr(tanggal,1,7)=? AND tipe='OUT'
+    GROUP BY kategori, currency
+    """, (bulan,))
     krows = cur.fetchall()
 
     if krows:
@@ -154,8 +190,9 @@ def main():
     app.add_handler(CommandHandler("in", in_cmd))
     app.add_handler(CommandHandler("today", today))
     app.add_handler(CommandHandler("summary", summary))
+    app.add_handler(CommandHandler("month", month))
 
-    print("Cashflow bot v2 jalan...")
+    print("Cashflow bot v3 jalan...")
     app.run_polling()
 
 
