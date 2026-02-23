@@ -14,7 +14,7 @@ async def bangun_async():
 def bangun():
     asyncio.run(bangun_async())
 
-schedule.every(1).minutes.do(bangun)
+schedule.every().day.at("05:30").do(bangun)
 
 print("Bot jalan...")
 
@@ -22,4 +22,5 @@ while True:
     schedule.run_pending()
     import time
 time.sleep(1)
+
 
